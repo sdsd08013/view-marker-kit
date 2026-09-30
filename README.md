@@ -68,3 +68,7 @@ layer.hide(pin)
 
 - minSdk 26 / compileSdk 36
 - 依存: play-services-maps, androidx.lifecycle, androidx.core, kotlinx-coroutines
+
+## ライセンス
+
+Apache License 2.0。詳細は [LICENSE](LICENSE) を参照。
