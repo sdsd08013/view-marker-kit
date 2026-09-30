@@ -11,8 +11,12 @@ import com.google.android.gms.maps.model.LatLng
 interface ViewMarker {
     val id: Long
 
-    /** 描画済み View と座標の対応付けに使うキー。 */
-    val identity: MarkerIdentity
+    /**
+     * 描画済み View と座標の対応付けに使うキー。
+     * 既定は [id] をそのまま使う。種別ごとに id の空間が分かれているなど、id だけでは
+     * 一意にならない場合に override する。
+     */
+    val identity: MarkerIdentity get() = IdMarkerIdentity(id)
 
     var location: LatLng
 

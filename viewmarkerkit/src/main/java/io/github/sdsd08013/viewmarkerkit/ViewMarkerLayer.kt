@@ -30,7 +30,7 @@ import kotlin.math.sign
  * どのマーカーを載せるか（クラスタリング・間引き・focus など）は利用側が決めて [show] / [hide] を呼ぶ。
  *
  * カメラの `OnCameraMoveListener` / `OnCameraIdleListener` から [onCameraMove] / [onCameraIdle] を
- * 呼ぶこと。特記のない操作は main thread から行う。
+ * 呼ぶこと（自前のリスナーが無ければ [attachCameraListeners] で足りる）。特記のない操作は main thread から行う。
  *
  * @param lifecycleOwner 内部の coroutine の寿命。View を持つ画面なら view の lifecycle を渡す
  * @param overlay マーカー View の載せ先。GoogleMap と同じ領域に重ねて配置し、
@@ -305,6 +305,18 @@ class ViewMarkerLayer<M : ViewMarker>(
             // これにより次のonCameraMoveで正しくデルタ計算が開始される
             positionCoordinator.resetReferencePoint()
         }
+    }
+
+    /**
+     * GoogleMap のカメラリスナーを本 layer に繋ぐ。
+     *
+     * `setOnCameraMoveListener` / `setOnCameraIdleListener` を上書きするため、自前のリスナーを
+     * 持つ場合は使わず、そのリスナーから [onCameraMove] / [onCameraIdle] を呼ぶ。
+     */
+    @MainThread
+    fun attachCameraListeners() {
+        googleMap.setOnCameraMoveListener { onCameraMove() }
+        googleMap.setOnCameraIdleListener { onCameraIdle() }
     }
 
     // ---- 参照 ----

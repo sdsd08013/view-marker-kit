@@ -1,7 +1,6 @@
 package io.github.sdsd08013.viewmarkerkit
 
 import android.view.View
-import io.github.sdsd08013.viewmarkerkit.MarkerEdge
 
 /**
  * [ViewMarker] から描画用の concrete View を非同期生成する factory。
@@ -13,6 +12,8 @@ import io.github.sdsd08013.viewmarkerkit.MarkerEdge
  *
  * View 生成に要る context / lifecycleOwner / listener は実装が構築時に閉じ込め、呼び出し側は marker と
  * edge だけ渡す。[onCreated] は main thread で呼ぶ。
+ *
+ * 非同期 inflate が要らなければ [sync] で作る。
  */
 fun interface MarkerViewFactory {
     fun createAsync(
@@ -20,4 +21,10 @@ fun interface MarkerViewFactory {
         edge: MarkerEdge,
         onCreated: (View) -> Unit,
     )
+
+    companion object {
+        /** View を同期で作る factory。[create] は main thread で呼ばれる。 */
+        fun sync(create: (marker: ViewMarker, edge: MarkerEdge) -> View): MarkerViewFactory =
+            MarkerViewFactory { marker, edge, onCreated -> onCreated(create(marker, edge)) }
+    }
 }
