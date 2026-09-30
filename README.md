@@ -1,19 +1,22 @@
 # ViewMarkerKit
 
-Google Maps の上に、本物の Android View をマーカーとして表示するためのライブラリです。
+Render real Android views as markers on Google Maps.
 
-`AdvancedMarkerOptions.iconView` は View を画像化して表示しますが、ViewMarkerKit は View をそのまま地図に重ねてカメラに同期させます。マーカー内でアニメーションを動かしたり、マーカーの一部だけをタップ可能にしたりできます。
+`AdvancedMarkerOptions.iconView` rasterizes a view into an image. ViewMarkerKit instead keeps the
+view itself on top of the map and moves it with the camera, so the marker can run animations and
+have individually tappable parts.
 
-持つのは「View を載せる / 外す」「スクリーン座標をカメラに追従させる」「位置を滑らかに動かす」だけです。どのマーカーを載せるか（クラスタリング・間引き・focus など）は利用側が決めます。
+The library only attaches and detaches views, follows the camera and animates moves. Which markers
+to show (clustering, decluttering, focus, ...) is up to you.
 
-- View ベースのマーカー表示とカメラ同期（カメラ移動中はデルタ計算で追従）
-- 画面外マーカーの端寄せ表示（`EdgeMode.Clamp`）
-- 位置のなめらかな移動
-- View への一過性イベントの配送
+- View-based markers synced with the camera (delta calculation while panning)
+- Off-screen markers clamped to the screen edge (`EdgeMode.Clamp`)
+- Smooth moves between locations
+- One-shot events delivered to marker views
 
-> 開発中です。API はまだ安定していません。
+> Work in progress. The API is not stable yet.
 
-## 導入
+## Setup
 
 ```kotlin
 // settings.gradle.kts
@@ -29,48 +32,49 @@ dependencies {
 }
 ```
 
-## 使い方
+## Usage
 
 ```kotlin
-// 1. マーカーの契約を実装する（id / 位置 / View の一辺の dp）
+// 1. Implement the marker contract: id, location and the view size in dp
 class Pin(override val id: Long, override var location: LatLng) : ViewMarker {
     override val sizeInDp = 48
 }
 
-// 2. GoogleMap と同じ領域に MarkerOverlayView を重ね、View の作り方を渡す
+// 2. Place a MarkerOverlayView over the map, covering the same area, and tell it how to create views
 overlay.viewFactory = MarkerViewFactory.sync { marker, _ -> PinView(context) }
 
-// 3. layer を作り、カメラのコールバックを繋ぐ
+// 3. Create the layer and hook up the camera callbacks
 val layer = ViewMarkerLayer<Pin>(activity, viewLifecycleOwner, googleMap, overlay)
 layer.attachCameraListeners()
 
-// 4. 載せる / 外す / 動かす
+// 4. Show, move and hide markers
 layer.show(pin)
 layer.moveSmoothly(pin, to = newLocation)
 layer.hide(pin)
 ```
 
-`ClusterManager` は必要ありません。クラスタリングや間引きをしたい場合は、その結果に応じて `show` / `hide` を呼びます。
+`ClusterManager` is not required. To cluster or declutter, call `show` / `hide` based on your own logic.
 
-非同期に inflate したい場合は `MarkerViewFactory { marker, edge, onCreated -> ... }` で `onCreated` を後から呼びます。
-GoogleMap のカメラリスナーを自前で持つ場合は `attachCameraListeners()` の代わりに、そのリスナーから `layer.onCameraMove()` / `layer.onCameraIdle()` を呼びます。
+Use `MarkerViewFactory { marker, edge, onCreated -> ... }` to inflate views asynchronously and call
+`onCreated` later. If you keep your own camera listeners, call `layer.onCameraMove()` /
+`layer.onCameraIdle()` from them instead of `attachCameraListeners()`.
 
-## 公開 API
+## Public API
 
-| 型 | 役割 |
+| Type | Role |
 |---|---|
-| `ViewMarker` / `MarkerIdentity` | マーカーの契約（位置・大きさ・識別子）。識別子は既定で `id` がそのまま使われる |
-| `MarkerOverlayView` / `MarkerViewFactory` | View の載せ先と、View の生成（同期なら `MarkerViewFactory.sync`） |
-| `ViewMarkerLayer` / `ViewMarkerLayer.Listener` | 描画層の本体 |
-| `EdgeMode` / `MarkerEdge` | 画面外マーカーの扱い（そのまま / 画面端へ寄せる） |
-| `MarkerPositionDescriptor` / `Alignable` / `ScreenPoint` | 配置情報と、端へ寄せたときの View への通知 |
-| `MarkerEvent` / `MarkerEventReceiver` | `MarkerOverlayView.dispatchEvent` で View へ一過性イベントを渡す |
+| `ViewMarker` / `MarkerIdentity` | Marker contract: location, size and identity (defaults to `id`) |
+| `MarkerOverlayView` / `MarkerViewFactory` | Container for marker views and how to create them (`MarkerViewFactory.sync` for synchronous creation) |
+| `ViewMarkerLayer` / `ViewMarkerLayer.Listener` | The layer itself |
+| `EdgeMode` / `MarkerEdge` | How off-screen markers are handled: keep as is, or clamp to the edge |
+| `MarkerPositionDescriptor` / `Alignable` / `ScreenPoint` | Placement info, and how a view learns about it when clamped |
+| `MarkerEvent` / `MarkerEventReceiver` | One-shot events sent to a view via `MarkerOverlayView.dispatchEvent` |
 
-## 動作要件
+## Requirements
 
 - minSdk 26 / compileSdk 36
-- 依存: play-services-maps, androidx.lifecycle, androidx.core, kotlinx-coroutines
+- Dependencies: play-services-maps, androidx.lifecycle, androidx.core, kotlinx-coroutines
 
-## ライセンス
+## License
 
-Apache License 2.0。詳細は [LICENSE](LICENSE) を参照。
+Apache License 2.0. See [LICENSE](LICENSE).

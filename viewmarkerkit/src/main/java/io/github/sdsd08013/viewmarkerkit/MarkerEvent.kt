@@ -1,13 +1,10 @@
 package io.github.sdsd08013.viewmarkerkit
 
 /**
- * 描画済みマーカーへの一過性イベント（state ではなく event）。
+ * A one-shot event delivered to an attached marker view via [MarkerOverlayView.dispatchEvent].
  *
- * 分類基準: 「今この view が破棄→再生成されたら復元すべき物があるか？」が **無い** もの = event。
- * 継続的な状態の描画経路には載せず、out-of-band な単一 channel
- * （[MarkerOverlayView.dispatchEvent] → [MarkerEventReceiver.receive]）で渡す。
- *
- * イベントの種類は利用側が定義する。per-event メソッドを生やさず、sealed な階層で
- * 直和として表現することを推奨する。
+ * Use it for things that do not need to be restored when the view is recreated
+ * (an animation trigger, for example). Define the concrete events in your app,
+ * preferably as a sealed hierarchy.
  */
 interface MarkerEvent

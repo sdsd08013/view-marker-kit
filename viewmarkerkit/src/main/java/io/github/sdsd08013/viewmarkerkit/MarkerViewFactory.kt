@@ -3,17 +3,10 @@ package io.github.sdsd08013.viewmarkerkit
 import android.view.View
 
 /**
- * [ViewMarker] から描画用の concrete View を非同期生成する factory。
+ * Creates the view for a marker. Set it on [MarkerOverlayView.viewFactory].
  *
- * inflate する layout / ViewBinding / concrete な View の生成は全て利用側に閉じる。
- * 呼び出し側（[MarkerOverlayView]）は layout / binding / inflater を一切知らず、本 interface に
- * 「marker に対応する View を作って渡して」と頼むだけにする。実装は利用側が overlay へ注入する
- * （GoogleMap の setInfoWindowAdapter と同じく、描画サーフェスが利用側注入の View factory を持つ）。
- *
- * View 生成に要る context / lifecycleOwner / listener は実装が構築時に閉じ込め、呼び出し側は marker と
- * edge だけ渡す。[onCreated] は main thread で呼ぶ。
- *
- * 非同期 inflate が要らなければ [sync] で作る。
+ * [createAsync] may inflate on a background thread, but [onCreated] must be called on
+ * the main thread. Use [sync] when the view can be created synchronously.
  */
 fun interface MarkerViewFactory {
     fun createAsync(
@@ -23,7 +16,7 @@ fun interface MarkerViewFactory {
     )
 
     companion object {
-        /** View を同期で作る factory。[create] は main thread で呼ばれる。 */
+        /** A factory that creates views synchronously on the main thread. */
         fun sync(create: (marker: ViewMarker, edge: MarkerEdge) -> View): MarkerViewFactory =
             MarkerViewFactory { marker, edge, onCreated -> onCreated(create(marker, edge)) }
     }

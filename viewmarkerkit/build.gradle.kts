@@ -34,7 +34,7 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    // api: public API surface に型が露出するもの
+    // api: types exposed in the public API
     api(libs.androidx.lifecycle.runtime)
     api(libs.google.maps.services)
 

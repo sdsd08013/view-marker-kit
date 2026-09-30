@@ -1,1 +1,1 @@
-# ViewMarkerKit の consumer keep rules。現時点で reflection 由来の keep は不要。
+# Consumer keep rules for ViewMarkerKit. Nothing is accessed via reflection yet.

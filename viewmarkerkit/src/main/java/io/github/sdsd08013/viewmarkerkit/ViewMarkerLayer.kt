@@ -24,19 +24,18 @@ import kotlin.math.abs
 import kotlin.math.sign
 
 /**
- * GoogleMap の上に Android View をマーカーとして重ね、カメラに同期させる描画層。
+ * Renders [ViewMarker]s as Android views on top of a [GoogleMap] and keeps them in sync
+ * with the camera.
  *
- * 持つのは「View を載せる / 外す」「スクリーン座標をカメラに追従させる」「位置を滑らかに動かす」だけで、
- * どのマーカーを載せるか（クラスタリング・間引き・focus など）は利用側が決めて [show] / [hide] を呼ぶ。
+ * The layer attaches and detaches views, follows the camera and animates moves. Deciding
+ * which markers to show is up to the caller; call [show] / [hide] accordingly.
  *
- * カメラの `OnCameraMoveListener` / `OnCameraIdleListener` から [onCameraMove] / [onCameraIdle] を
- * 呼ぶこと（自前のリスナーが無ければ [attachCameraListeners] で足りる）。特記のない操作は main thread から行う。
+ * Forward the map's camera callbacks to [onCameraMove] / [onCameraIdle], or call
+ * [attachCameraListeners]. Unless noted otherwise, methods must be called on the main thread.
  *
- * @param lifecycleOwner 内部の coroutine の寿命。View を持つ画面なら view の lifecycle を渡す
- * @param overlay マーカー View の載せ先。GoogleMap と同じ領域に重ねて配置し、
- *                [MarkerOverlayView.viewFactory] を設定しておく
- * @param visibleBoundsMarginDp [visibleBounds] が画面の外側へ広げる余白。
- *                              画面端で View が見切れて消えないよう、最大マーカーサイズ以上を渡す
+ * @param lifecycleOwner scopes the internal coroutines; use the view lifecycle of the screen
+ * @param overlay the container for marker views, placed over the map with [MarkerOverlayView.viewFactory] set
+ * @param visibleBoundsMarginDp how far [visibleBounds] extends beyond the screen; use at least the largest marker size
  */
 class ViewMarkerLayer<M : ViewMarker>(
     private val activity: Activity,
@@ -49,12 +48,12 @@ class ViewMarkerLayer<M : ViewMarker>(
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     interface Listener<M : ViewMarker> {
-        /** [marker] の View が overlay に載り、位置が登録された直後に呼ばれる。 */
+        /** The view of [marker] has been attached and its position registered. */
         fun onMarkerAttached(marker: M, view: View, descriptor: MarkerPositionDescriptor) {}
 
         /**
-         * カメラ追従で View の位置を反映した直後に、載っている View ごとに呼ばれる（カメラ移動中は毎フレーム）。
-         * [marker] は [show] された登録が既に無ければ null。
+         * The position of an attached view has been applied. Called for every attached view
+         * on each camera move. [marker] is null if it has been hidden in the meantime.
          */
         fun onPositionApplied(marker: M?, view: View, descriptor: MarkerPositionDescriptor) {}
     }
@@ -67,20 +66,17 @@ class ViewMarkerLayer<M : ViewMarker>(
         }
     }
 
-    // Conflated Channel for projection updates (drops old values, keeps only latest)
+    // Conflated: only the latest camera state matters
     private val cameraUpdateChannel = Channel<MarkerCameraState>(Channel.CONFLATED)
 
-    // 座標計算と座標データを統合管理
     private val positionCoordinator = MarkerPositionCoordinator(density, overlay, edgeMode)
 
-    // show されたマーカー（inflate 待ちを含む）
+    // Markers passed to show(), including those whose view is still being created
     private val markersPool = ConcurrentHashMap<MarkerIdentity, M>()
 
     init {
-        // 描画完了イベントに反応して View 依存の後処理を行う（inflate の完了タイミングは overlay が所有）
         overlay.onMarkerRendered = ::handleMarkerRendered
 
-        // Single coroutine consuming projection updates on IO dispatcher
         lifecycleOwner.lifecycleScope.launch(ioDispatcher) {
             for (request in cameraUpdateChannel) {
                 updatePositionDescriptors(request)
@@ -88,15 +84,15 @@ class ViewMarkerLayer<M : ViewMarker>(
         }
     }
 
-    // ---- 表示 ----
+    // ---- Showing ----
 
     /**
-     * [marker] を載せる。既に View が載っていれば位置だけ更新する。
+     * Shows [marker]. If its view is already attached, only the position is updated.
      *
-     * View の生成（inflate）は非同期で、完了時に [shouldAttach] が false を返すか、
-     * それまでに [hide] されていれば載せない。
+     * View creation may be asynchronous; the view is not attached if [shouldAttach] returns
+     * false or [hide] was called in the meantime.
      *
-     * @param initialScale 載せるときの View のスケール。不要なら null
+     * @param initialScale scale applied to the view when attached, or null
      */
     fun show(marker: M, initialScale: Float? = null, shouldAttach: () -> Boolean = { true }) {
         val identity = marker.identity
@@ -109,18 +105,14 @@ class ViewMarkerLayer<M : ViewMarker>(
         }
     }
 
-    /**
-     * [marker] を外す。main thread 以外から呼んでもよい（View の取り外しは main thread で行う）。
-     */
+    /** Hides [marker]. Safe to call from any thread; the view is removed on the main thread. */
     fun hide(marker: M) {
         val identity = marker.identity
 
-        // 登録の削除は同期的に実行する
-        // inflate完了後のガード（markersPool.containsKey）が確実に機能するために必要
+        // Unregister synchronously so a pending show() cannot attach after this
         val annotation = overlay.removeAnnotation(identity)
         markersPool.remove(identity)
 
-        // View操作はMain threadで実行
         lifecycleOwner.lifecycleScope.launch {
             if (annotation != null) {
                 overlay.removeView(annotation.view)
@@ -136,8 +128,6 @@ class ViewMarkerLayer<M : ViewMarker>(
         lifecycleOwner.lifecycleScope.launch {
             val descriptor = generateMarkerPositionDescriptor(marker, positionResult)
 
-            // 描画（inflate 込み）のタイミングは overlay が所有する。layer は配置情報を計算して依頼するだけ。
-            // 描画続行判定（削除・表示条件の変化の遅延ガード）は overlay が inflate 完了時に評価する。
             overlay.render(
                 marker = marker,
                 descriptor = descriptor,
@@ -148,26 +138,21 @@ class ViewMarkerLayer<M : ViewMarker>(
     }
 
     /**
-     * overlay からの描画完了通知に反応する。View が attach された後に初めて意味を持つ後処理を行う。
+     * The view is attached, so the position can be registered.
      *
-     * position 登録は「描画済みマーカーの集合」に対してのみ意味を持つため attach 内では行えず、
-     * 描画完了イベントで行う。overlay が putAnnotation → 本イベント発火 の順を保証するため、
-     * putAnnotation が addPosition に先行する（＝計算基準リセット後の calculateFull で descriptor が脱落しない）。
-     *
-     * 本処理は新規 coroutine で走るため putAnnotation とは非アトミック。dispatch の隙間に
-     * hide が割り込むと削除済みマーカーの descriptor を addPosition しうるが、
-     * calculateFull が viewAnnotationMap 基準で positions を replaceAll するため一過性で自己修復する。
+     * This runs in a new coroutine, so a hide() in between may leave a stale position;
+     * the next full calculation replaces all positions from the attached views and heals it.
      */
     private fun handleMarkerRendered(event: MarkerRendered) {
         lifecycleOwner.lifecycleScope.launch {
             positionCoordinator.addPosition(event.descriptor)
 
-            // overlay.render に渡すのは本 layer の M だけ
+            // render() is only called with this layer's M
             @Suppress("UNCHECKED_CAST")
             listener?.onMarkerAttached(event.marker as M, event.annotation.view, event.descriptor)
 
             if (edgeMode is EdgeMode.Clamp) {
-                // 端に寄せた表示は View のサイズが確定してから揃え直す
+                // Align once the view has been measured
                 val annotation = event.annotation
                 val descriptor = event.descriptor
                 annotation.view.viewTreeObserver.addOnGlobalLayoutListener(
@@ -183,9 +168,7 @@ class ViewMarkerLayer<M : ViewMarker>(
         }
     }
 
-    /**
-     * 載っている [marker] の View に、レイアウトサイズ（[ViewMarker.sizeInDp]）と位置を適用し直す。
-     */
+    /** Re-applies the layout size ([ViewMarker.sizeInDp]) and position of an attached view. */
     suspend fun relayout(marker: M) {
         val view = overlay.getAnnotation(marker.identity)?.view ?: return
         val point = googleMap.projection.toScreenLocation(marker.location)
@@ -199,11 +182,9 @@ class ViewMarkerLayer<M : ViewMarker>(
         view.layoutParams = FrameLayout.LayoutParams(size, size)
     }
 
-    // ---- 位置 ----
+    // ---- Positions ----
 
-    /**
-     * [marker] の [ViewMarker.location] の変更を View に反映する。View が載っていなければ何もしない。
-     */
+    /** Applies a changed [ViewMarker.location] to the attached view, if any. */
     fun updatePosition(marker: M) {
         val identity = marker.identity
         val annotation = overlay.getAnnotation(identity) ?: return
@@ -217,7 +198,6 @@ class ViewMarkerLayer<M : ViewMarker>(
 
             applyTranslation(annotation.view, descriptor)
 
-            // 座標計算基準とpositionsを一括更新
             positionCoordinator.updateSingleMarkerPosition(
                 markerId = identity,
                 marker = marker,
@@ -230,9 +210,9 @@ class ViewMarkerLayer<M : ViewMarker>(
     }
 
     /**
-     * [marker] を現在位置から [to] へ等速で動かす。
+     * Moves [marker] from its current location to [to] at constant speed.
      *
-     * @param onEnd 移動完了時（[ViewMarker.location] が [to] になった後）に呼ばれる
+     * @param onEnd called when the move is complete and [ViewMarker.location] equals [to]
      */
     fun moveSmoothly(marker: M, to: LatLng, durationMs: Long = DEFAULT_MOVE_DURATION_MS, onEnd: () -> Unit = {}) {
         val startPosition = marker.location
@@ -263,37 +243,31 @@ class ViewMarkerLayer<M : ViewMarker>(
     }
 
     /**
-     * カメラ移動中に毎フレーム呼ぶ。座標を再計算し、直近の計算結果を View に反映する。
+     * Call on every camera move. Recalculates positions and applies the latest result to the views.
      *
-     * @param applyToViews false なら再計算だけを行い、View には反映しない
+     * @param applyToViews when false, only recalculates
      */
     @MainThread
     fun onCameraMove(applyToViews: Boolean = true) {
-        // 座標更新は毎フレーム実行
-        // Capture camera state on main thread before sending to IO
         cameraUpdateChannel.trySend(captureCameraState())
 
         if (applyToViews) {
-            // スナップショットキャッシュを使用（ロックなし、コルーチン不要）
             val positions = positionCoordinator.getSnapshot()
             updateMarkersScreenPosition(positions)
         }
     }
 
     /**
-     * カメラ停止時に呼ぶ。座標を再計算して View に反映し、計算の基準点をリセットする。
+     * Call when the camera stops. Recalculates positions, applies them and resets the reference frame.
      *
-     * @param onRecalculated 再計算の直後・View への反映の前に main thread で呼ばれる。
-     *                       載せるマーカーの見直しなど、カメラ停止時の処理をここで行う。
-     *                       false を返すと View への反映を行わない
+     * @param onRecalculated called on the main thread after recalculation and before positions are applied.
+     *                       Return false to skip applying them.
      */
     @MainThread
     fun onCameraIdle(onRecalculated: () -> Boolean = { true }) {
-        // Capture camera state on main thread
         val cameraState = captureCameraState()
 
         lifecycleOwner.lifecycleScope.launch {
-            // 座標更新
             updatePositionDescriptors(cameraState)
 
             if (onRecalculated()) {
@@ -301,17 +275,14 @@ class ViewMarkerLayer<M : ViewMarker>(
                 updateMarkersScreenPosition(positions)
             }
 
-            // onCameraIdle後は必ず参照点をリセット
-            // これにより次のonCameraMoveで正しくデルタ計算が開始される
+            // Start from a full calculation on the next camera move
             positionCoordinator.resetReferencePoint()
         }
     }
 
     /**
-     * GoogleMap のカメラリスナーを本 layer に繋ぐ。
-     *
-     * `setOnCameraMoveListener` / `setOnCameraIdleListener` を上書きするため、自前のリスナーを
-     * 持つ場合は使わず、そのリスナーから [onCameraMove] / [onCameraIdle] を呼ぶ。
+     * Sets this layer as the map's camera move / idle listener.
+     * If you need your own listeners, forward them to [onCameraMove] / [onCameraIdle] instead.
      */
     @MainThread
     fun attachCameraListeners() {
@@ -319,25 +290,25 @@ class ViewMarkerLayer<M : ViewMarker>(
         googleMap.setOnCameraIdleListener { onCameraIdle() }
     }
 
-    // ---- 参照 ----
+    // ---- Queries ----
 
-    /** View が overlay に載っているマーカー。main thread 以外から読んでもよい。 */
+    /** Markers whose view is attached. Safe to read from any thread. */
     val attachedMarkers: List<M>
         get() = overlay.annotationKeys().mapNotNull { markersPool[it] }
 
-    /** overlay に載っている View の数。 */
+    /** Number of attached views. */
     val attachedCount: Int get() = overlay.annotations.size
 
     fun isAttached(identity: MarkerIdentity): Boolean = overlay.containsAnnotation(identity)
 
-    /** [identity] のマーカーの View。載っていなければ null。 */
+    /** The attached view of [identity], or null. */
     fun viewOf(identity: MarkerIdentity): View? = overlay.getAnnotation(identity)?.view
 
-    /** [identity] のマーカーの直近の配置情報。載っていなければ null。 */
+    /** The latest position of the attached marker [identity], or null. */
     suspend fun descriptorOf(identity: MarkerIdentity): MarkerPositionDescriptor? =
         positionCoordinator.find { it.identifier == identity }
 
-    /** 載っているマーカーの現在のスクリーン座標。キーは [ViewMarker.childIds] の各 id。 */
+    /** Current screen positions of attached markers, keyed by [ViewMarker.childIds]. */
     suspend fun currentScreenPoints(): Map<Long, ScreenPoint> {
         val screenPoints = mutableMapOf<Long, ScreenPoint>()
         positionCoordinator.forEach { descriptor ->
@@ -352,27 +323,24 @@ class ViewMarkerLayer<M : ViewMarker>(
         return screenPoints
     }
 
-    /** 画面に余白（`visibleBoundsMarginDp`）を加えた範囲。 */
+    /** The visible area extended by `visibleBoundsMarginDp`. */
     @MainThread
     fun visibleBounds(): LatLngBounds = boundary.boundsWithMargin(googleMap)
 
-    /**
-     * [marker] が [visibleBounds] の内側にあるか。
-     * [EdgeMode.Clamp] では画面外のマーカーも端に寄せて表示するため、常に true。
-     */
+    /** Whether [marker] is inside [visibleBounds]. Always true with [EdgeMode.Clamp]. */
     @MainThread
     fun isInVisibleBounds(marker: M): Boolean = when (edgeMode) {
         is EdgeMode.Clamp -> true
         EdgeMode.None -> boundary.isInVisibleBounds(marker, googleMap)
     }
 
-    /** [bounds] を事前に取得済みのときの [isInVisibleBounds]。main thread 以外から呼んでもよい。 */
+    /** [isInVisibleBounds] with precomputed [bounds]. Safe to call from any thread. */
     fun isInVisibleBounds(marker: M, bounds: LatLngBounds): Boolean = when (edgeMode) {
         is EdgeMode.Clamp -> true
         EdgeMode.None -> boundary.isInVisibleBounds(marker, bounds)
     }
 
-    // ---- 内部 ----
+    // ---- Internal ----
 
     @MainThread
     private fun captureCameraState() = MarkerCameraState(
@@ -382,10 +350,6 @@ class ViewMarkerLayer<M : ViewMarker>(
         center = googleMap.cameraPosition.target
     )
 
-    /**
-     * マーカーの座標更新（毎フレーム実行）
-     * 座標計算はMarkerPositionCoordinatorに委譲
-     */
     @WorkerThread
     private suspend fun updatePositionDescriptors(cameraState: MarkerCameraState) {
         positionCoordinator.updateAllPositions(
@@ -441,15 +405,15 @@ class ViewMarkerLayer<M : ViewMarker>(
         edgeMode.resolve(screenPoint, overlay.width, overlay.height)
 
     companion object {
-        /** [moveSmoothly] の既定の移動時間。 */
+        /** Default duration of [moveSmoothly]. */
         const val DEFAULT_MOVE_DURATION_MS = 2000L
 
-        /** `visibleBoundsMarginDp` の既定値。 */
+        /** Default `visibleBoundsMarginDp`. */
         const val DEFAULT_VISIBLE_BOUNDS_MARGIN_DP = 240
 
         private val linearInterpolator = LinearInterpolator()
 
-        /** 経度 180 度線を跨ぐときは短い側を通る線形補間。 */
+        /** Linear interpolation that takes the short way across the antimeridian. */
         private fun interpolate(fraction: Float, from: LatLng, to: LatLng): LatLng {
             var delta = to.longitude - from.longitude
             if (abs(delta) > 180) {

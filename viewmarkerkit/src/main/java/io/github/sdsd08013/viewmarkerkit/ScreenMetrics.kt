@@ -1,8 +1,6 @@
 package io.github.sdsd08013.viewmarkerkit
 
-/**
- * 幾何計算に必要な画面情報。Context を計算層に持ち込まないための純データ。
- */
+/** Screen size and density needed by the geometry code, so it never touches a `Context`. */
 internal data class ScreenMetrics(
     val density: Float,
     val widthPixels: Int,

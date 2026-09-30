@@ -11,14 +11,14 @@ class ViewMarkerTest {
     }
 
     @Test
-    fun `identity の既定値は id だけで決まる`() {
+    fun `default identity is derived from id only`() {
         assertEquals(Pin(1).identity, Pin(1, LatLng(1.0, 1.0)).identity)
         assertNotEquals(Pin(1).identity, Pin(2).identity)
         assertEquals(IdMarkerIdentity(1), Pin(1).identity)
     }
 
     @Test
-    fun `sizeInPx と offset は sizeInDp と density から決まる`() {
+    fun `sizeInPx and offsets are derived from sizeInDp and density`() {
         val pin = Pin(1)
 
         assertEquals(96, pin.sizeInPx(2f))

@@ -1,27 +1,18 @@
 package io.github.sdsd08013.viewmarkerkit
 
-/**
- * スクリーン座標の補正結果。
- *
- * @param adjustedPoint 補正後のアンカー座標
- * @param angleInDegrees 画面端へ寄せた場合の、画面中央から見た角度。寄せていなければ 0
- */
+/** A screen position after [EdgeMode] is applied. [angleInDegrees] is 0 unless the point was clamped. */
 internal data class MarkerPositionResult(
     val adjustedPoint: ScreenPoint,
     val angleInDegrees: Float,
 )
 
-/**
- * 画面外にあるマーカーの扱い。
- */
+/** How markers outside the screen are handled. */
 sealed class EdgeMode {
-    /** スクリーン座標をモードに応じて補正する。 */
     internal abstract fun resolve(screenPoint: ScreenPoint, screenWidth: Int, screenHeight: Int): MarkerPositionResult
 
-    /** 補正後の座標が画面のどの端にあるかを返す。 */
     internal abstract fun edgeAt(adjustedPoint: ScreenPoint, screenWidth: Int, screenHeight: Int): MarkerEdge
 
-    /** 画面外のマーカーは画面外のまま置く（端への寄せ・角度計算をしない）。 */
+    /** Markers keep their real screen position, even when it is off screen. */
     data object None : EdgeMode() {
         override fun resolve(screenPoint: ScreenPoint, screenWidth: Int, screenHeight: Int): MarkerPositionResult =
             MarkerPositionResult(adjustedPoint = screenPoint, angleInDegrees = 0f)
@@ -30,10 +21,9 @@ sealed class EdgeMode {
     }
 
     /**
-     * 画面外のマーカーを画面端へ寄せて表示する。
+     * Off-screen markers are pulled to the screen edge, [marginPx] away from it.
      *
-     * @param marginPx 画面端からの余白
-     * @param bottomInsetPx 画面下端から除外する領域の高さ（入力欄など）
+     * @param bottomInsetPx area excluded from the bottom, e.g. an input bar
      */
     data class Clamp(
         val marginPx: Int,

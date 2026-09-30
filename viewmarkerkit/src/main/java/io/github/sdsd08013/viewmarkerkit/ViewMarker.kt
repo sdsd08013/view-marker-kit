@@ -3,34 +3,33 @@ package io.github.sdsd08013.viewmarkerkit
 import com.google.android.gms.maps.model.LatLng
 
 /**
- * 地図上に Android View として描画するマーカーの契約。
+ * A marker rendered as an Android view.
  *
- * 描画層が必要とするのは「どこに（[location]）」「どの大きさで（[sizeInDp]）」「何として
- * （[identity]）」置くかだけで、見た目や種別ごとの状態は利用側の実装が持つ。
+ * The layer only needs where to put the view ([location]), how large it is ([sizeInDp])
+ * and how to identify it ([identity]). Everything else belongs to your implementation.
  */
 interface ViewMarker {
     val id: Long
 
     /**
-     * 描画済み View と座標の対応付けに使うキー。
-     * 既定は [id] をそのまま使う。種別ごとに id の空間が分かれているなど、id だけでは
-     * 一意にならない場合に override する。
+     * Key used to match the marker with its view and position.
+     * Override when [id] alone is not unique, e.g. when ids of different marker types overlap.
      */
     val identity: MarkerIdentity get() = IdMarkerIdentity(id)
 
     var location: LatLng
 
-    /** View の一辺の長さ（dp）。View は正方形の領域として overlay に置かれる。 */
+    /** Side length of the square area the view occupies, in dp. */
     val sizeInDp: Int
 
     fun sizeInPx(density: Float): Int = sizeInDp.dpToPx(density)
 
-    /** View の左上から [location] に合わせるアンカーまでの水平距離（px）。既定は中央。 */
+    /** Horizontal distance in px from the view's top-left corner to the point placed at [location]. Defaults to the center. */
     fun offsetX(density: Float): Int = sizeInPx(density) / 2
 
-    /** View の左上から [location] に合わせるアンカーまでの垂直距離（px）。既定は中央。 */
+    /** Vertical distance in px from the view's top-left corner to the point placed at [location]. Defaults to the center. */
     fun offsetY(density: Float): Int = sizeInPx(density) / 2
 
-    /** このマーカーが代表する要素の id。複数要素を束ねるマーカーは構成要素の id を返す。 */
+    /** Ids represented by this marker. A marker that groups several items returns their ids. */
     val childIds: List<Long> get() = listOf(id)
 }

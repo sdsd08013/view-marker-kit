@@ -8,7 +8,7 @@ class EdgeModeTest {
     private val height = 1920
 
     @Test
-    fun `None - 画面外の点も補正せず edge は NONE`() {
+    fun `None keeps off-screen points and reports NONE`() {
         val point = ScreenPoint(-100, 3000)
 
         val result = EdgeMode.None.resolve(point, width, height)
@@ -19,7 +19,7 @@ class EdgeModeTest {
     }
 
     @Test
-    fun `Clamp - 画面内の点はそのままで edge は NONE`() {
+    fun `Clamp keeps on-screen points and reports NONE`() {
         val mode = EdgeMode.Clamp(marginPx = 60)
         val point = ScreenPoint(540, 960)
 
@@ -31,7 +31,7 @@ class EdgeModeTest {
     }
 
     @Test
-    fun `Clamp - 左に外れた点は左端へ寄せ 画面中央から見た角度を返す`() {
+    fun `Clamp pulls a point beyond the left edge to LEFT with the angle from center`() {
         val mode = EdgeMode.Clamp(marginPx = 60)
 
         val result = mode.resolve(ScreenPoint(-100, 960), width, height)
@@ -42,7 +42,7 @@ class EdgeModeTest {
     }
 
     @Test
-    fun `Clamp - 下に外れた点は下端へ寄せる`() {
+    fun `Clamp pulls a point beyond the bottom edge to BOTTOM`() {
         val mode = EdgeMode.Clamp(marginPx = 60)
 
         val result = mode.resolve(ScreenPoint(540, 3000), width, height)
@@ -52,12 +52,12 @@ class EdgeModeTest {
     }
 
     @Test
-    fun `Clamp - bottomInsetPx は寄せ先だけに効き edge 判定には使われない`() {
+    fun `bottomInsetPx affects the clamped position but not the edge`() {
         val mode = EdgeMode.Clamp(marginPx = 60, bottomInsetPx = 200)
 
         val result = mode.resolve(ScreenPoint(540, 3000), width, height)
 
-        // 寄せ先は inset の分だけ上がるが、edge 判定は inset を引かない下端を基準にするため NONE になる
+        // The point is raised by the inset, but edge detection still uses the bottom without the inset
         assertEquals(ScreenPoint(540, 1660), result.adjustedPoint)
         assertEquals(MarkerEdge.NONE, mode.edgeAt(result.adjustedPoint, width, height))
     }

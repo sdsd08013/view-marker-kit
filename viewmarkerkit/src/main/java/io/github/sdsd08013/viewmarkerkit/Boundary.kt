@@ -5,12 +5,11 @@ import androidx.annotation.MainThread
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
-import io.github.sdsd08013.viewmarkerkit.ScreenMetrics
 
 /**
- * 描画対象とみなす範囲（画面 + 余白）の判定。
+ * The visible area of the map extended by [marginDp] on every side.
  *
- * @param marginDp 画面の外側に取る余白。画面端で View が見切れて消えないよう、最大マーカーサイズ以上を渡す
+ * The margin keeps markers near the edge attached while part of their view is still on screen.
  */
 internal class Boundary(
     private val marginDp: Int,

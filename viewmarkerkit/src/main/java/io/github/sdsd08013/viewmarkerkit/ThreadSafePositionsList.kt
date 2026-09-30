@@ -3,16 +3,11 @@ package io.github.sdsd08013.viewmarkerkit
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/**
- * Thread-safe wrapper for marker position list.
- * Encapsulates mutex operations to prevent race conditions.
- * Uses snapshot caching for lock-free reads.
- */
+/** Mutex-guarded list of positions with a lock-free snapshot for per-frame reads. */
 internal class ThreadSafePositionsList {
     private val list: MutableList<MarkerPositionDescriptor> = mutableListOf()
     private val mutex = Mutex()
 
-    // 読み取り用スナップショット（ロックなしでアクセス可能）
     @Volatile
     private var cachedSnapshot: List<MarkerPositionDescriptor> = emptyList()
 
@@ -38,9 +33,6 @@ internal class ThreadSafePositionsList {
         }
     }
 
-    /**
-     * 指定されたIDのdescriptorを更新、存在しなければ追加
-     */
     suspend fun updateOrAdd(descriptor: MarkerPositionDescriptor) {
         mutex.withLock {
             val index = list.indexOfFirst { it.identifier == descriptor.identifier }
@@ -53,9 +45,7 @@ internal class ThreadSafePositionsList {
         }
     }
 
-    /**
-     * ロックなしでスナップショットを取得（毎フレーム呼び出し用）
-     */
+    /** Latest snapshot, readable without taking the lock. */
     fun getSnapshot(): List<MarkerPositionDescriptor> = cachedSnapshot
 
     suspend fun toList(): List<MarkerPositionDescriptor> {

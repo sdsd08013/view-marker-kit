@@ -2,6 +2,7 @@ package io.github.sdsd08013.viewmarkerkit
 
 import kotlin.math.atan2
 
+/** Angle in degrees (0..360, clockwise from the bottom) of a point as seen from the screen center. */
 internal fun calculateAngleFromCenter(
     edgeX: Double,
     edgeY: Double,
@@ -10,9 +11,9 @@ internal fun calculateAngleFromCenter(
 ): Double {
     val dx = edgeX - centerX
     val dy = edgeY - centerY
-    
+
     val angleInDegrees = Math.toDegrees(atan2(-dx, dy))
-    
+
     return if (angleInDegrees < 0) angleInDegrees + 360 else angleInDegrees
 }
 
