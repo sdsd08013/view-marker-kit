@@ -32,8 +32,21 @@ class MarkerOverlayView @JvmOverloads constructor(
     /** Creates the view for each marker. Required. */
     var viewFactory: MarkerViewFactory? = null
 
-    /** Called after a view has been attached. Set by [ViewMarkerLayer]. */
-    internal var onMarkerRendered: ((MarkerRendered) -> Unit)? = null
+    /** The layer currently using this overlay. An overlay serves one layer at a time. */
+    internal var layer: ViewMarkerLayer<*>? = null
+        private set
+
+    /** Binds [newLayer]; a previously bound layer is closed first. */
+    internal fun bind(newLayer: ViewMarkerLayer<*>) {
+        val previous = layer
+        if (previous === newLayer) return
+        previous?.close()
+        layer = newLayer
+    }
+
+    internal fun unbind(boundLayer: ViewMarkerLayer<*>) {
+        if (layer === boundLayer) layer = null
+    }
 
     /** Attached views by identity. */
     internal val annotations: MutableMap<MarkerIdentity, ViewAnnotation> get() = viewAnnotationMap
@@ -77,7 +90,7 @@ class MarkerOverlayView @JvmOverloads constructor(
 
             putAnnotation(marker.identity, annotation)
 
-            onMarkerRendered?.invoke(MarkerRendered(marker, annotation, descriptor))
+            layer?.onMarkerRendered(MarkerRendered(marker, annotation, descriptor))
         }
     }
 

@@ -52,13 +52,12 @@ class EdgeModeTest {
     }
 
     @Test
-    fun `bottomInsetPx affects the clamped position but not the edge`() {
+    fun `bottomInsetPx moves the bottom edge up`() {
         val mode = EdgeMode.Clamp(marginPx = 60, bottomInsetPx = 200)
 
         val result = mode.resolve(ScreenPoint(540, 3000), width, height)
 
-        // The point is raised by the inset, but edge detection still uses the bottom without the inset
         assertEquals(ScreenPoint(540, 1660), result.adjustedPoint)
-        assertEquals(MarkerEdge.NONE, mode.edgeAt(result.adjustedPoint, width, height))
+        assertEquals(MarkerEdge.BOTTOM, mode.edgeAt(result.adjustedPoint, width, height))
     }
 }
