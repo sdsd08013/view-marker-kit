@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "view-marker-kit"
 include(":viewmarkerkit")
+include(":sample-views")
