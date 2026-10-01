@@ -67,7 +67,7 @@ class ViewMarkerLayer<M : ViewMarker>(
     // Conflated: only the latest camera state matters
     private val cameraUpdateChannel = Channel<MarkerCameraState>(Channel.CONFLATED)
 
-    private val positionCoordinator = MarkerPositionCoordinator(density, overlay, edgeMode)
+    private val positionCoordinator = MarkerPositionCoordinator(density, { Viewport(overlay.width, overlay.height) }, edgeMode)
 
     // Markers passed to show(), including those whose view is still being created
     private val markersPool = ConcurrentHashMap<MarkerIdentity, M>()
@@ -198,9 +198,8 @@ class ViewMarkerLayer<M : ViewMarker>(
     fun updatePosition(marker: M) {
         val identity = marker.identity
         val annotation = overlay.getAnnotation(identity) ?: return
-        val projection = googleMap.projection
-        val point = projection.toScreenLocation(marker.location)
-        val screenPoint = ScreenPoint(point.x, point.y)
+        val projection = googleMap.projection.asScreenProjection()
+        val screenPoint = projection.toScreen(marker.location)
         val descriptor = generateMarkerPositionDescriptor(marker, screenPoint)
 
         applyTranslation(annotation.view, descriptor)
@@ -289,13 +288,13 @@ class ViewMarkerLayer<M : ViewMarker>(
 
     /** The overlay area extended by `visibleBoundsMarginDp`. */
     @MainThread
-    fun visibleBounds(): LatLngBounds = boundary.boundsWithMargin(googleMap)
+    fun visibleBounds(): LatLngBounds = boundary.boundsWithMargin(googleMap.projection.asScreenProjection())
 
     /** Whether [marker] is inside [visibleBounds]. Always true with [EdgeMode.Clamp]. */
     @MainThread
     fun isInVisibleBounds(marker: M): Boolean = when (edgeMode) {
         is EdgeMode.Clamp -> true
-        EdgeMode.None -> boundary.isInVisibleBounds(marker, googleMap)
+        EdgeMode.None -> boundary.isInVisibleBounds(marker, googleMap.projection.asScreenProjection())
     }
 
     /** [isInVisibleBounds] with precomputed [bounds]. Safe to call from any thread. */
@@ -308,7 +307,7 @@ class ViewMarkerLayer<M : ViewMarker>(
 
     @MainThread
     private fun captureCameraState() = MarkerCameraState(
-        projection = googleMap.projection,
+        projection = googleMap.projection.asScreenProjection(),
         zoom = googleMap.cameraPosition.zoom,
         bearing = googleMap.cameraPosition.bearing,
         center = googleMap.cameraPosition.target
@@ -317,7 +316,7 @@ class ViewMarkerLayer<M : ViewMarker>(
     private fun updatePositionDescriptors(cameraState: MarkerCameraState) {
         positionCoordinator.updateAllPositions(
             cameraState = cameraState,
-            viewAnnotationMap = overlay.annotations,
+            attached = overlay.annotationKeys(),
             markersPool = markersPool,
         )
     }
@@ -350,8 +349,8 @@ class ViewMarkerLayer<M : ViewMarker>(
 
     @MainThread
     private fun generateMarkerPositionDescriptor(marker: ViewMarker): MarkerPositionDescriptor {
-        val point = googleMap.projection.toScreenLocation(marker.location)
-        return generateMarkerPositionDescriptor(marker, ScreenPoint(point.x, point.y))
+        val screenPoint = googleMap.projection.asScreenProjection().toScreen(marker.location)
+        return generateMarkerPositionDescriptor(marker, screenPoint)
     }
 
     private fun generateMarkerPositionDescriptor(marker: ViewMarker, screenPoint: ScreenPoint): MarkerPositionDescriptor {
