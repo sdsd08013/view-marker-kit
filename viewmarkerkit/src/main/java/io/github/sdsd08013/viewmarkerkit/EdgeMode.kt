@@ -45,7 +45,7 @@ sealed class EdgeMode {
             val left = marginPx
             val right = screenWidth - marginPx
             val top = marginPx
-            val bottom = screenHeight - marginPx
+            val bottom = screenHeight - marginPx - bottomInsetPx
 
             val isLeft = adjustedPoint.x <= left
             val isRight = adjustedPoint.x >= right

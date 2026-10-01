@@ -6,12 +6,11 @@ Render real Android views as markers on Google Maps.
 view itself on top of the map and moves it with the camera, so the marker can run animations and
 have individually tappable parts.
 
-The library only attaches and detaches views, follows the camera and animates moves. Which markers
-to show (clustering, decluttering, focus, ...) is up to you.
+The library only attaches and detaches views and follows the camera. Which markers to show
+(clustering, decluttering, focus, ...) is up to you.
 
 - View-based markers synced with the camera (delta calculation while panning)
 - Off-screen markers clamped to the screen edge (`EdgeMode.Clamp`)
-- Smooth moves between locations
 - One-shot events delivered to marker views
 
 > Work in progress. The API is not stable yet.
@@ -44,13 +43,30 @@ class Pin(override val id: Long, override var location: LatLng) : ViewMarker {
 overlay.viewFactory = MarkerViewFactory.sync { marker, _ -> PinView(context) }
 
 // 3. Create the layer and hook up the camera callbacks
-val layer = ViewMarkerLayer<Pin>(activity, viewLifecycleOwner, googleMap, overlay)
+val layer = ViewMarkerLayer<Pin>(viewLifecycleOwner, googleMap, overlay)
 layer.attachCameraListeners()
 
 // 4. Show, move and hide markers
 layer.show(pin)
-layer.moveSmoothly(pin, to = newLocation)
+pin.location = newLocation
+layer.updatePosition(pin)
 layer.hide(pin)
+
+// 5. Release the layer when the screen goes away
+layer.close()
+```
+
+To animate a move, update the location on every animation frame (`SphericalUtil` is from
+android-maps-utils; any interpolation works):
+
+```kotlin
+ValueAnimator.ofFloat(0f, 1f).apply {
+    duration = 2000
+    addUpdateListener {
+        pin.location = SphericalUtil.interpolate(from, to, animatedFraction.toDouble())
+        layer.updatePosition(pin)
+    }
+}.start()
 ```
 
 `ClusterManager` is not required. To cluster or declutter, call `show` / `hide` based on your own logic.

@@ -1,7 +1,6 @@
 package io.github.sdsd08013.viewmarkerkit
 
 import android.widget.FrameLayout
-import androidx.annotation.WorkerThread
 import com.google.android.gms.maps.Projection
 import com.google.android.gms.maps.model.LatLng
 
@@ -11,6 +10,9 @@ import com.google.android.gms.maps.model.LatLng
  * While the camera only pans, positions are derived from a reference frame by applying the
  * camera's screen-space delta (cheap, no accumulated error). On zoom or bearing changes, and
  * whenever the reference frame is missing, every marker is projected again.
+ *
+ * The reference frame is an immutable value replaced atomically, so [calculate] may run on a
+ * background thread while [updateMarkerBase] / [resetReferenceFrame] are called from the main thread.
  */
 internal class MarkerPositionCalculator(
     private val density: Float,
@@ -23,54 +25,44 @@ internal class MarkerPositionCalculator(
         val offsetY: Int
     )
 
-    private var baseCenterLatLng: LatLng? = null
-    private var baseDescriptors: Map<MarkerIdentity, BaseMarkerInfo>? = null
-    private var previousZoom: Float? = null
-    private var previousBearing: Float? = null
+    private data class ReferenceFrame(
+        val center: LatLng,
+        val zoom: Float,
+        val bearing: Float,
+        val bases: Map<MarkerIdentity, BaseMarkerInfo>,
+    )
 
-    private fun canUseDeltaCalculation(currentZoom: Float, currentBearing: Float): Boolean {
-        baseCenterLatLng ?: return false
-        baseDescriptors ?: return false
-        val prevZoom = previousZoom ?: return false
-        val prevBearing = previousBearing ?: return false
-        return currentZoom == prevZoom && currentBearing == prevBearing
-    }
+    @Volatile
+    private var reference: ReferenceFrame? = null
 
-    @WorkerThread
     fun calculate(
         cameraState: MarkerCameraState,
         currentDescriptors: List<MarkerPositionDescriptor>,
         viewAnnotationMap: Map<MarkerIdentity, ViewAnnotation>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {
-        val result = if (canUseDeltaCalculation(cameraState.zoom, cameraState.bearing)) {
-            calculateWithDelta(cameraState, currentDescriptors)
+        val frame = reference
+        return if (frame != null && frame.zoom == cameraState.zoom && frame.bearing == cameraState.bearing) {
+            calculateWithDelta(frame, cameraState, currentDescriptors)
         } else {
             calculateFull(cameraState, viewAnnotationMap, markersPool)
         }
-
-        previousZoom = cameraState.zoom
-        previousBearing = cameraState.bearing
-
-        return result
     }
 
-    @WorkerThread
     private fun calculateWithDelta(
+        frame: ReferenceFrame,
         cameraState: MarkerCameraState,
         currentDescriptors: List<MarkerPositionDescriptor>,
     ): List<MarkerPositionDescriptor> {
-        val baseCenter = baseCenterLatLng ?: return emptyList()
-        val baseMap = baseDescriptors ?: return emptyList()
         val projection = cameraState.projection
 
-        val baseCenterScreen = projection.toScreenLocation(baseCenter)
+        val baseCenterScreen = projection.toScreenLocation(frame.center)
         val currentCenterScreen = projection.toScreenLocation(cameraState.center)
         val deltaX = currentCenterScreen.x - baseCenterScreen.x
         val deltaY = currentCenterScreen.y - baseCenterScreen.y
 
         return currentDescriptors.map { descriptor ->
-            applyDeltaToDescriptor(descriptor, deltaX, deltaY, baseMap)
+            applyDeltaToDescriptor(descriptor, deltaX, deltaY, frame.bases)
         }
     }
 
@@ -78,9 +70,9 @@ internal class MarkerPositionCalculator(
         descriptor: MarkerPositionDescriptor,
         deltaX: Int,
         deltaY: Int,
-        baseMap: Map<MarkerIdentity, BaseMarkerInfo>,
+        bases: Map<MarkerIdentity, BaseMarkerInfo>,
     ): MarkerPositionDescriptor {
-        val baseInfo = baseMap[descriptor.identifier] ?: return descriptor
+        val baseInfo = bases[descriptor.identifier] ?: return descriptor
 
         val newOrigin = ScreenPoint(
             baseInfo.origin.x - deltaX,
@@ -100,14 +92,13 @@ internal class MarkerPositionCalculator(
         )
     }
 
-    @WorkerThread
     private fun calculateFull(
         cameraState: MarkerCameraState,
         viewAnnotationMap: Map<MarkerIdentity, ViewAnnotation>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {
         val projection = cameraState.projection
-        val newBaseDescriptors = mutableMapOf<MarkerIdentity, BaseMarkerInfo>()
+        val bases = mutableMapOf<MarkerIdentity, BaseMarkerInfo>()
 
         val result = viewAnnotationMap.mapNotNull { (id, _) ->
             val marker = markersPool[id] ?: return@mapNotNull null
@@ -115,7 +106,7 @@ internal class MarkerPositionCalculator(
             val screenPoint = ScreenPoint(point.x, point.y)
             val positionResult = calculatePositionResult(screenPoint)
 
-            newBaseDescriptors[id] = BaseMarkerInfo(
+            bases[id] = BaseMarkerInfo(
                 origin = screenPoint,
                 offsetX = marker.offsetX(density),
                 offsetY = marker.offsetY(density)
@@ -124,23 +115,25 @@ internal class MarkerPositionCalculator(
             createDescriptor(id, marker, positionResult)
         }
 
-        baseCenterLatLng = cameraState.center
-        baseDescriptors = newBaseDescriptors
+        reference = ReferenceFrame(
+            center = cameraState.center,
+            zoom = cameraState.zoom,
+            bearing = cameraState.bearing,
+            bases = bases,
+        )
 
         return result
     }
 
     /** Drops the reference frame so that the next calculation projects every marker again. */
-    fun resetReferencePoint() {
-        baseCenterLatLng = null
-        baseDescriptors = null
+    fun resetReferenceFrame() {
+        reference = null
     }
 
     /**
      * Updates the reference frame for one marker whose location changed while the camera
      * is moving, so delta calculation keeps producing correct positions for it.
      */
-    @Synchronized
     fun updateMarkerBase(
         markerId: MarkerIdentity,
         currentScreenPoint: ScreenPoint,
@@ -148,26 +141,20 @@ internal class MarkerPositionCalculator(
         projection: Projection,
         currentCenter: LatLng
     ) {
-        val currentBase = baseDescriptors?.toMutableMap() ?: return
-        val baseCenter = baseCenterLatLng ?: return
+        val frame = reference ?: return
 
         // Translate the current screen point back into the reference frame
-        val baseCenterScreen = projection.toScreenLocation(baseCenter)
+        val baseCenterScreen = projection.toScreenLocation(frame.center)
         val currentCenterScreen = projection.toScreenLocation(currentCenter)
         val deltaX = currentCenterScreen.x - baseCenterScreen.x
         val deltaY = currentCenterScreen.y - baseCenterScreen.y
 
-        val baseScreenPoint = ScreenPoint(
-            currentScreenPoint.x + deltaX,
-            currentScreenPoint.y + deltaY
-        )
-
-        currentBase[markerId] = BaseMarkerInfo(
-            origin = baseScreenPoint,
+        val baseInfo = BaseMarkerInfo(
+            origin = ScreenPoint(currentScreenPoint.x + deltaX, currentScreenPoint.y + deltaY),
             offsetX = marker.offsetX(density),
             offsetY = marker.offsetY(density)
         )
-        baseDescriptors = currentBase
+        reference = frame.copy(bases = frame.bases + (markerId to baseInfo))
     }
 
     private fun calculatePositionResult(screenPoint: ScreenPoint): MarkerPositionResult {

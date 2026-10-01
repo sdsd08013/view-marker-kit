@@ -1,7 +1,6 @@
 package io.github.sdsd08013.viewmarkerkit
 
 import android.widget.FrameLayout
-import androidx.annotation.WorkerThread
 import com.google.android.gms.maps.Projection
 import com.google.android.gms.maps.model.LatLng
 
@@ -12,18 +11,17 @@ internal class MarkerPositionCoordinator(
     edgeMode: EdgeMode,
 ) {
     private val calculator = MarkerPositionCalculator(density, mapOverlay, edgeMode)
-    private val positions = ThreadSafePositionsList()
+    private val positions = PositionStore()
 
-    /** Recomputes all positions for [cameraState] and stores them. */
-    @WorkerThread
-    suspend fun updateAllPositions(
+    /** Recomputes all positions for [cameraState] and stores them. May be called from any thread. */
+    fun updateAllPositions(
         cameraState: MarkerCameraState,
         viewAnnotationMap: Map<MarkerIdentity, ViewAnnotation>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {
         val descriptors = calculator.calculate(
             cameraState = cameraState,
-            currentDescriptors = positions.getSnapshot(),
+            currentDescriptors = positions.snapshot,
             viewAnnotationMap = viewAnnotationMap,
             markersPool = markersPool
         )
@@ -32,7 +30,7 @@ internal class MarkerPositionCoordinator(
     }
 
     /** Stores a new position for one marker whose location changed. */
-    suspend fun updateSingleMarkerPosition(
+    fun updateSingleMarkerPosition(
         markerId: MarkerIdentity,
         marker: ViewMarker,
         screenPoint: ScreenPoint,
@@ -45,25 +43,22 @@ internal class MarkerPositionCoordinator(
     }
 
     /** Registers a newly attached marker. The next calculation projects every marker again. */
-    suspend fun addPosition(descriptor: MarkerPositionDescriptor) {
+    fun addPosition(descriptor: MarkerPositionDescriptor) {
         positions.add(descriptor)
-        calculator.resetReferencePoint()
+        calculator.resetReferenceFrame()
     }
 
-    /** Latest positions without taking the lock, for per-frame reads. */
-    fun getSnapshot(): List<MarkerPositionDescriptor> = positions.getSnapshot()
+    /** Latest positions without taking a lock, for per-frame reads. */
+    val snapshot: List<MarkerPositionDescriptor> get() = positions.snapshot
 
-    suspend fun toList(): List<MarkerPositionDescriptor> = positions.toList()
+    fun find(identity: MarkerIdentity): MarkerPositionDescriptor? = positions.find(identity)
 
-    suspend fun find(predicate: (MarkerPositionDescriptor) -> Boolean): MarkerPositionDescriptor? {
-        return positions.find(predicate)
+    fun resetReferenceFrame() {
+        calculator.resetReferenceFrame()
     }
 
-    suspend fun forEach(action: (MarkerPositionDescriptor) -> Unit) {
-        positions.forEach(action)
-    }
-
-    fun resetReferencePoint() {
-        calculator.resetReferencePoint()
+    fun clear() {
+        positions.clear()
+        calculator.resetReferenceFrame()
     }
 }

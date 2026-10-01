@@ -33,8 +33,8 @@ internal class Boundary(
         val h = metrics.heightPixels
 
         val topLeft = Point(-maxMarkerSize, -maxMarkerSize)
-        val topRight = Point(w + maxMarkerSize, 0)
-        val bottomLeft = Point(0, h + maxMarkerSize)
+        val topRight = Point(w + maxMarkerSize, -maxMarkerSize)
+        val bottomLeft = Point(-maxMarkerSize, h + maxMarkerSize)
         val bottomRight = Point(w + maxMarkerSize, h + maxMarkerSize)
 
         val topLeftLatLng: LatLng = googleMap.projection.fromScreenLocation(topLeft)
