@@ -88,19 +88,16 @@ Use `MarkerViewFactory { marker, edge, onCreated -> ... }` to inflate views asyn
 | `MarkerPositionDescriptor` / `Alignable` / `ScreenPoint` | Placement info, and how a view learns about it when clamped |
 | `MarkerEvent` / `MarkerEventReceiver` | One-shot events sent to a view via `MarkerOverlayView.dispatchEvent` |
 
-## Samples
+## Sample
 
-Two sample apps show the same scene (pins over Tokyo, one of them moving, tap to bounce,
-a switch for `EdgeMode.Clamp`):
-
-- [`sample-views`](sample-views): XML layout with `MapView` and `MarkerOverlayView`, marker views written as Android views
-- [`sample-compose`](sample-compose): Jetpack Compose screen; the map and the overlay are hosted in one `AndroidView`, marker content is written in Compose (`AbstractComposeView`)
+[`sample-views`](sample-views) shows pins over Tokyo, one of them moving, tap to bounce,
+and a switch for `EdgeMode.Clamp`. It uses an XML layout with `MapView` and `MarkerOverlayView`;
+marker views are plain Android views.
 
 The map and the overlay must share one View hierarchy so that touches on empty overlay areas
-fall through to the map. In Compose, host both in a single `AndroidView` rather than stacking
-two `AndroidView`s.
+fall through to the map. A Compose-native overlay is being developed as a separate library.
 
-To run them, put a Google Maps API key in `local.properties` (it is read into the manifest at build time and never committed):
+To run it, put a Google Maps API key in `local.properties` (it is read into the manifest at build time and never committed):
 
 ```
 MAPS_API_KEY=your_key

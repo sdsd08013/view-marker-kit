@@ -26,8 +26,8 @@ jobs:
       - name: Unit tests and release build
         run: ./gradlew :viewmarkerkit:testDebugUnitTest :viewmarkerkit:assembleRelease --no-daemon
 
-      - name: Build samples
-        run: ./gradlew :sample-views:assembleDebug :sample-compose:assembleDebug --no-daemon
+      - name: Build sample
+        run: ./gradlew :sample-views:assembleDebug --no-daemon
 
       - name: Upload test reports
         if: always()
