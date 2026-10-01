@@ -1,28 +1,26 @@
 package io.github.sdsd08013.viewmarkerkit
 
-import android.widget.FrameLayout
-import com.google.android.gms.maps.Projection
 import com.google.android.gms.maps.model.LatLng
 
 /** Keeps the position calculator and the stored positions in sync. */
 internal class MarkerPositionCoordinator(
     density: Float,
-    mapOverlay: FrameLayout,
+    viewport: () -> Viewport,
     edgeMode: EdgeMode,
 ) {
-    private val calculator = MarkerPositionCalculator(density, mapOverlay, edgeMode)
+    private val calculator = MarkerPositionCalculator(density, viewport, edgeMode)
     private val positions = PositionStore()
 
     /** Recomputes all positions for [cameraState] and stores them. May be called from any thread. */
     fun updateAllPositions(
         cameraState: MarkerCameraState,
-        viewAnnotationMap: Map<MarkerIdentity, ViewAnnotation>,
+        attached: Set<MarkerIdentity>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {
         val descriptors = calculator.calculate(
             cameraState = cameraState,
             currentDescriptors = positions.snapshot,
-            viewAnnotationMap = viewAnnotationMap,
+            attached = attached,
             markersPool = markersPool
         )
         positions.replaceAll(descriptors)
@@ -34,7 +32,7 @@ internal class MarkerPositionCoordinator(
         markerId: MarkerIdentity,
         marker: ViewMarker,
         screenPoint: ScreenPoint,
-        projection: Projection,
+        projection: ScreenProjection,
         currentCenter: LatLng,
         descriptor: MarkerPositionDescriptor
     ) {

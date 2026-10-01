@@ -1,5 +1,7 @@
 # ViewMarkerKit
 
+[![CI](https://github.com/sdsd08013/view-marker-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/sdsd08013/view-marker-kit/actions/workflows/ci.yml)
+
 Render real Android views as markers on Google Maps.
 
 `AdvancedMarkerOptions.iconView` rasterizes a view into an image. ViewMarkerKit instead keeps the

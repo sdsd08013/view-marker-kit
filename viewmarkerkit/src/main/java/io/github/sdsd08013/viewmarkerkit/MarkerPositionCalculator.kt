@@ -1,7 +1,5 @@
 package io.github.sdsd08013.viewmarkerkit
 
-import android.widget.FrameLayout
-import com.google.android.gms.maps.Projection
 import com.google.android.gms.maps.model.LatLng
 
 /**
@@ -16,7 +14,7 @@ import com.google.android.gms.maps.model.LatLng
  */
 internal class MarkerPositionCalculator(
     private val density: Float,
-    private val mapOverlay: FrameLayout,
+    private val viewport: () -> Viewport,
     private val edgeMode: EdgeMode,
 ) {
     private data class BaseMarkerInfo(
@@ -38,14 +36,14 @@ internal class MarkerPositionCalculator(
     fun calculate(
         cameraState: MarkerCameraState,
         currentDescriptors: List<MarkerPositionDescriptor>,
-        viewAnnotationMap: Map<MarkerIdentity, ViewAnnotation>,
+        attached: Set<MarkerIdentity>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {
         val frame = reference
         return if (frame != null && frame.zoom == cameraState.zoom && frame.bearing == cameraState.bearing) {
             calculateWithDelta(frame, cameraState, currentDescriptors)
         } else {
-            calculateFull(cameraState, viewAnnotationMap, markersPool)
+            calculateFull(cameraState, attached, markersPool)
         }
     }
 
@@ -56,8 +54,8 @@ internal class MarkerPositionCalculator(
     ): List<MarkerPositionDescriptor> {
         val projection = cameraState.projection
 
-        val baseCenterScreen = projection.toScreenLocation(frame.center)
-        val currentCenterScreen = projection.toScreenLocation(cameraState.center)
+        val baseCenterScreen = projection.toScreen(frame.center)
+        val currentCenterScreen = projection.toScreen(cameraState.center)
         val deltaX = currentCenterScreen.x - baseCenterScreen.x
         val deltaY = currentCenterScreen.y - baseCenterScreen.y
 
@@ -94,16 +92,15 @@ internal class MarkerPositionCalculator(
 
     private fun calculateFull(
         cameraState: MarkerCameraState,
-        viewAnnotationMap: Map<MarkerIdentity, ViewAnnotation>,
+        attached: Set<MarkerIdentity>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {
         val projection = cameraState.projection
         val bases = mutableMapOf<MarkerIdentity, BaseMarkerInfo>()
 
-        val result = viewAnnotationMap.mapNotNull { (id, _) ->
+        val result = attached.mapNotNull { id ->
             val marker = markersPool[id] ?: return@mapNotNull null
-            val point = projection.toScreenLocation(marker.location)
-            val screenPoint = ScreenPoint(point.x, point.y)
+            val screenPoint = projection.toScreen(marker.location)
             val positionResult = calculatePositionResult(screenPoint)
 
             bases[id] = BaseMarkerInfo(
@@ -138,14 +135,14 @@ internal class MarkerPositionCalculator(
         markerId: MarkerIdentity,
         currentScreenPoint: ScreenPoint,
         marker: ViewMarker,
-        projection: Projection,
+        projection: ScreenProjection,
         currentCenter: LatLng
     ) {
         val frame = reference ?: return
 
         // Translate the current screen point back into the reference frame
-        val baseCenterScreen = projection.toScreenLocation(frame.center)
-        val currentCenterScreen = projection.toScreenLocation(currentCenter)
+        val baseCenterScreen = projection.toScreen(frame.center)
+        val currentCenterScreen = projection.toScreen(currentCenter)
         val deltaX = currentCenterScreen.x - baseCenterScreen.x
         val deltaY = currentCenterScreen.y - baseCenterScreen.y
 
@@ -158,19 +155,13 @@ internal class MarkerPositionCalculator(
     }
 
     private fun calculatePositionResult(screenPoint: ScreenPoint): MarkerPositionResult {
-        return edgeMode.resolve(
-            screenPoint,
-            mapOverlay.width,
-            mapOverlay.height
-        )
+        val (width, height) = viewport()
+        return edgeMode.resolve(screenPoint, width, height)
     }
 
     private fun getEdgePosition(point: ScreenPoint): MarkerEdge {
-        return edgeMode.edgeAt(
-            point,
-            mapOverlay.width,
-            mapOverlay.height
-        )
+        val (width, height) = viewport()
+        return edgeMode.edgeAt(point, width, height)
     }
 
     private fun createDescriptor(
