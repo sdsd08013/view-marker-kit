@@ -38,7 +38,7 @@ class ViewMarkerLayer<M : ViewMarker>(
     private val lifecycleOwner: LifecycleOwner,
     private val googleMap: GoogleMap,
     private val overlay: MarkerOverlayView,
-    private val edgeMode: EdgeMode = EdgeMode.None,
+    val edgeMode: EdgeMode = EdgeMode.None,
     visibleBoundsMarginDp: Int = DEFAULT_VISIBLE_BOUNDS_MARGIN_DP,
     private val listener: Listener<M>? = null,
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -56,21 +56,24 @@ class ViewMarkerLayer<M : ViewMarker>(
 
     private val density: Float = overlay.resources.displayMetrics.density
 
-    private val boundary = Boundary(marginDp = visibleBoundsMarginDp) {
-        val metrics = overlay.resources.displayMetrics
-        // Before the first layout the overlay has no size; fall back to the screen
-        val width = if (overlay.width > 0) overlay.width else metrics.widthPixels
-        val height = if (overlay.height > 0) overlay.height else metrics.heightPixels
-        ScreenMetrics(metrics.density, width, height)
-    }
+    private val engine = MarkerPositionEngine<M>(
+        density = density,
+        viewport = {
+            val metrics = overlay.resources.displayMetrics
+            // Before the first layout the overlay has no size; fall back to the screen
+            val width = if (overlay.width > 0) overlay.width else metrics.widthPixels
+            val height = if (overlay.height > 0) overlay.height else metrics.heightPixels
+            Viewport(width, height)
+        },
+        edgeMode = edgeMode,
+        visibleBoundsMarginDp = visibleBoundsMarginDp,
+    )
 
     // Conflated: only the latest camera state matters
-    private val cameraUpdateChannel = Channel<MarkerCameraState>(Channel.CONFLATED)
-
-    private val positionCoordinator = MarkerPositionCoordinator(density, { Viewport(overlay.width, overlay.height) }, edgeMode)
+    private val cameraUpdateChannel = Channel<CameraSnapshot>(Channel.CONFLATED)
 
     // Markers passed to show(), including those whose view is still being created
-    private val markersPool = ConcurrentHashMap<MarkerIdentity, M>()
+    private val shown = ConcurrentHashMap<MarkerIdentity, M>()
 
     private val cameraUpdateJob: Job
 
@@ -83,8 +86,8 @@ class ViewMarkerLayer<M : ViewMarker>(
         overlay.bind(this)
 
         cameraUpdateJob = lifecycleOwner.lifecycleScope.launch(ioDispatcher) {
-            for (request in cameraUpdateChannel) {
-                updatePositionDescriptors(request)
+            for (camera in cameraUpdateChannel) {
+                engine.recalculate(camera)
             }
         }
     }
@@ -103,8 +106,8 @@ class ViewMarkerLayer<M : ViewMarker>(
         for (identity in overlay.annotationKeys().toList()) {
             overlay.removeAnnotation(identity)?.let { overlay.removeView(it.view) }
         }
-        markersPool.clear()
-        positionCoordinator.clear()
+        shown.clear()
+        engine.clear()
     }
 
     // ---- Showing ----
@@ -121,7 +124,7 @@ class ViewMarkerLayer<M : ViewMarker>(
     fun show(marker: M, initialScale: Float? = null, shouldAttach: () -> Boolean = { true }) {
         if (isClosed) return
         val identity = marker.identity
-        markersPool[identity] = marker
+        shown[identity] = marker
 
         if (overlay.containsAnnotation(identity)) {
             updatePosition(marker)
@@ -136,7 +139,8 @@ class ViewMarkerLayer<M : ViewMarker>(
 
         // Unregister synchronously so a pending show() cannot attach after this
         val annotation = overlay.removeAnnotation(identity)
-        markersPool.remove(identity)
+        shown.remove(identity)
+        engine.detach(identity)
 
         if (annotation != null) {
             lifecycleOwner.lifecycleScope.launch {
@@ -146,23 +150,24 @@ class ViewMarkerLayer<M : ViewMarker>(
     }
 
     private fun attach(marker: M, initialScale: Float?, shouldAttach: () -> Boolean) {
-        val descriptor = generateMarkerPositionDescriptor(marker)
+        val descriptor = engine.descriptorFor(marker, googleMap.projection.asScreenProjection())
 
         overlay.render(
             marker = marker,
             descriptor = descriptor,
             scale = initialScale,
-            isRenderable = { !isClosed && shouldAttach() && markersPool.containsKey(marker.identity) },
+            isRenderable = { !isClosed && shouldAttach() && shown.containsKey(marker.identity) },
         )
     }
 
     /** Called by the overlay once a view is attached. */
     internal fun onMarkerRendered(event: MarkerRendered) {
-        positionCoordinator.addPosition(event.descriptor)
-
         // render() is only called with this layer's M
         @Suppress("UNCHECKED_CAST")
-        listener?.onMarkerAttached(event.marker as M, event.annotation.view, event.descriptor)
+        val marker = event.marker as M
+        engine.attach(marker, event.descriptor)
+
+        listener?.onMarkerAttached(marker, event.annotation.view, event.descriptor)
 
         if (edgeMode is EdgeMode.Clamp) {
             // Align once the view has been measured
@@ -185,7 +190,7 @@ class ViewMarkerLayer<M : ViewMarker>(
     fun relayout(marker: M) {
         val view = overlay.getAnnotation(marker.identity)?.view ?: return
         val size = marker.sizeInPx(density)
-        val descriptor = generateMarkerPositionDescriptor(marker)
+        val descriptor = engine.descriptorFor(marker, googleMap.projection.asScreenProjection())
 
         applyTranslation(view, descriptor)
         view.layoutParams = FrameLayout.LayoutParams(size, size)
@@ -198,20 +203,9 @@ class ViewMarkerLayer<M : ViewMarker>(
     fun updatePosition(marker: M) {
         val identity = marker.identity
         val annotation = overlay.getAnnotation(identity) ?: return
-        val projection = googleMap.projection.asScreenProjection()
-        val screenPoint = projection.toScreen(marker.location)
-        val descriptor = generateMarkerPositionDescriptor(marker, screenPoint)
+        val descriptor = engine.updateLocation(marker, googleMap.projection.asScreenProjection(), googleMap.cameraPosition.target)
 
         applyTranslation(annotation.view, descriptor)
-
-        positionCoordinator.updateSingleMarkerPosition(
-            markerId = identity,
-            marker = marker,
-            screenPoint = screenPoint,
-            projection = projection,
-            currentCenter = googleMap.cameraPosition.target,
-            descriptor = descriptor
-        )
     }
 
     /**
@@ -222,10 +216,10 @@ class ViewMarkerLayer<M : ViewMarker>(
     @MainThread
     fun onCameraMove(applyToViews: Boolean = true) {
         if (isClosed) return
-        cameraUpdateChannel.trySend(captureCameraState())
+        cameraUpdateChannel.trySend(googleMap.cameraSnapshot())
 
         if (applyToViews) {
-            updateMarkersScreenPosition(positionCoordinator.snapshot)
+            updateMarkersScreenPosition(engine.positions)
         }
     }
 
@@ -238,14 +232,14 @@ class ViewMarkerLayer<M : ViewMarker>(
     @MainThread
     fun onCameraIdle(onRecalculated: () -> Boolean = { true }) {
         if (isClosed) return
-        updatePositionDescriptors(captureCameraState())
+        engine.recalculate(googleMap.cameraSnapshot())
 
         if (onRecalculated()) {
-            updateMarkersScreenPosition(positionCoordinator.snapshot)
+            updateMarkersScreenPosition(engine.positions)
         }
 
         // Start from a full calculation on the next camera move
-        positionCoordinator.resetReferenceFrame()
+        engine.resetReferenceFrame()
     }
 
     /**
@@ -261,8 +255,7 @@ class ViewMarkerLayer<M : ViewMarker>(
     // ---- Queries ----
 
     /** Markers whose view is attached. Safe to read from any thread. */
-    val attachedMarkers: List<M>
-        get() = overlay.annotationKeys().mapNotNull { markersPool[it] }
+    val attachedMarkers: List<M> get() = engine.attachedMarkers
 
     /** Number of attached views. */
     val attachedCount: Int get() = overlay.annotations.size
@@ -273,12 +266,12 @@ class ViewMarkerLayer<M : ViewMarker>(
     fun viewOf(identity: MarkerIdentity): View? = overlay.getAnnotation(identity)?.view
 
     /** The latest position of the attached marker [identity], or null. */
-    fun descriptorOf(identity: MarkerIdentity): MarkerPositionDescriptor? = positionCoordinator.find(identity)
+    fun descriptorOf(identity: MarkerIdentity): MarkerPositionDescriptor? = engine.descriptorOf(identity)
 
     /** Current screen positions of attached markers, keyed by [ViewMarker.childIds]. */
     fun currentScreenPoints(): Map<Long, ScreenPoint> {
         val screenPoints = mutableMapOf<Long, ScreenPoint>()
-        positionCoordinator.snapshot.forEach { descriptor ->
+        engine.positions.forEach { descriptor ->
             descriptor.childIds.forEach {
                 screenPoints[it] = ScreenPoint(descriptor.origin.x, descriptor.origin.y)
             }
@@ -288,38 +281,16 @@ class ViewMarkerLayer<M : ViewMarker>(
 
     /** The overlay area extended by `visibleBoundsMarginDp`. */
     @MainThread
-    fun visibleBounds(): LatLngBounds = boundary.boundsWithMargin(googleMap.projection.asScreenProjection())
+    fun visibleBounds(): LatLngBounds = engine.visibleBounds(googleMap.projection.asScreenProjection())
 
     /** Whether [marker] is inside [visibleBounds]. Always true with [EdgeMode.Clamp]. */
     @MainThread
-    fun isInVisibleBounds(marker: M): Boolean = when (edgeMode) {
-        is EdgeMode.Clamp -> true
-        EdgeMode.None -> boundary.isInVisibleBounds(marker, googleMap.projection.asScreenProjection())
-    }
+    fun isInVisibleBounds(marker: M): Boolean = engine.isInVisibleBounds(marker, googleMap.projection.asScreenProjection())
 
     /** [isInVisibleBounds] with precomputed [bounds]. Safe to call from any thread. */
-    fun isInVisibleBounds(marker: M, bounds: LatLngBounds): Boolean = when (edgeMode) {
-        is EdgeMode.Clamp -> true
-        EdgeMode.None -> boundary.isInVisibleBounds(marker, bounds)
-    }
+    fun isInVisibleBounds(marker: M, bounds: LatLngBounds): Boolean = engine.isInVisibleBounds(marker, bounds)
 
     // ---- Internal ----
-
-    @MainThread
-    private fun captureCameraState() = MarkerCameraState(
-        projection = googleMap.projection.asScreenProjection(),
-        zoom = googleMap.cameraPosition.zoom,
-        bearing = googleMap.cameraPosition.bearing,
-        center = googleMap.cameraPosition.target
-    )
-
-    private fun updatePositionDescriptors(cameraState: MarkerCameraState) {
-        positionCoordinator.updateAllPositions(
-            cameraState = cameraState,
-            attached = overlay.annotationKeys(),
-            markersPool = markersPool,
-        )
-    }
 
     @MainThread
     private fun updateMarkersScreenPosition(descriptors: List<MarkerPositionDescriptor>) {
@@ -339,7 +310,7 @@ class ViewMarkerLayer<M : ViewMarker>(
             annotation.alignable?.align(descriptor)
         }
 
-        listener?.onPositionApplied(markersPool[descriptor.identifier], annotation.view, descriptor)
+        listener?.onPositionApplied(engine.attachedMarker(descriptor.identifier), annotation.view, descriptor)
     }
 
     private fun applyTranslation(view: View, descriptor: MarkerPositionDescriptor) {
@@ -347,28 +318,8 @@ class ViewMarkerLayer<M : ViewMarker>(
         view.translationY = descriptor.screenPosition.y.toFloat()
     }
 
-    @MainThread
-    private fun generateMarkerPositionDescriptor(marker: ViewMarker): MarkerPositionDescriptor {
-        val screenPoint = googleMap.projection.asScreenProjection().toScreen(marker.location)
-        return generateMarkerPositionDescriptor(marker, screenPoint)
-    }
-
-    private fun generateMarkerPositionDescriptor(marker: ViewMarker, screenPoint: ScreenPoint): MarkerPositionDescriptor {
-        val identity = marker.identity
-        val result = edgeMode.resolve(screenPoint, overlay.width, overlay.height)
-        return MarkerPositionDescriptor(
-            identifier = identity,
-            childIds = marker.childIds,
-            origin = ScreenPoint(result.adjustedPoint.x, result.adjustedPoint.y),
-            screenPosition = ScreenPoint(result.adjustedPoint.x - marker.offsetX(density), result.adjustedPoint.y - marker.offsetY(density)),
-            rotation = result.angleInDegrees,
-            currentEdge = edgeMode.edgeAt(result.adjustedPoint, overlay.width, overlay.height),
-            previousEdge = positionCoordinator.find(identity)?.currentEdge ?: MarkerEdge.NONE
-        )
-    }
-
     companion object {
         /** Default `visibleBoundsMarginDp`. */
-        const val DEFAULT_VISIBLE_BOUNDS_MARGIN_DP = 240
+        const val DEFAULT_VISIBLE_BOUNDS_MARGIN_DP = MarkerPositionEngine.DEFAULT_VISIBLE_BOUNDS_MARGIN_DP
     }
 }

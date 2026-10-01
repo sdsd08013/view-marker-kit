@@ -13,7 +13,7 @@ internal class MarkerPositionCoordinator(
 
     /** Recomputes all positions for [cameraState] and stores them. May be called from any thread. */
     fun updateAllPositions(
-        cameraState: MarkerCameraState,
+        cameraState: CameraSnapshot,
         attached: Set<MarkerIdentity>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {

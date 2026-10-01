@@ -14,7 +14,7 @@ class MarkerPositionCalculatorTest {
         MarkerPositionCalculator(density, { viewport }, edgeMode)
 
     private fun camera(zoom: Float = 15f, bearing: Float = 0f) =
-        MarkerCameraState(projection, zoom, bearing, projection.center)
+        CameraSnapshot(projection, zoom, bearing, projection.center)
 
     private val marker = TestMarker(1, LatLng(35.0, 139.0))
     private val pool = mapOf(marker.identity to marker)

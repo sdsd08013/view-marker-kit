@@ -103,6 +103,14 @@ To run it, put a Google Maps API key in `local.properties` (it is read into the 
 MAPS_API_KEY=your_key
 ```
 
+## Building another host
+
+`ViewMarkerLayer` is the Android View host. The camera-synced position calculation underneath it
+is public as `MarkerPositionEngine`, which knows nothing about views: call `attach` / `detach` as
+markers come and go, `recalculate(map.cameraSnapshot())` on camera moves (any thread) and when the
+camera stops (then `resetReferenceFrame()`), and read `positions`. A Compose host can place
+composables at those positions the same way the layer places views.
+
 ## Requirements
 
 - minSdk 26 / compileSdk 36

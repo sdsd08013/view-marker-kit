@@ -34,7 +34,7 @@ internal class MarkerPositionCalculator(
     private var reference: ReferenceFrame? = null
 
     fun calculate(
-        cameraState: MarkerCameraState,
+        cameraState: CameraSnapshot,
         currentDescriptors: List<MarkerPositionDescriptor>,
         attached: Set<MarkerIdentity>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
@@ -49,7 +49,7 @@ internal class MarkerPositionCalculator(
 
     private fun calculateWithDelta(
         frame: ReferenceFrame,
-        cameraState: MarkerCameraState,
+        cameraState: CameraSnapshot,
         currentDescriptors: List<MarkerPositionDescriptor>,
     ): List<MarkerPositionDescriptor> {
         val projection = cameraState.projection
@@ -91,7 +91,7 @@ internal class MarkerPositionCalculator(
     }
 
     private fun calculateFull(
-        cameraState: MarkerCameraState,
+        cameraState: CameraSnapshot,
         attached: Set<MarkerIdentity>,
         markersPool: Map<MarkerIdentity, ViewMarker>,
     ): List<MarkerPositionDescriptor> {
